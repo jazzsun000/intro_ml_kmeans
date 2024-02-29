@@ -1,119 +1,83 @@
 import streamlit as st
 import matplotlib.pyplot as plt
 import numpy as np
-from sklearn.datasets import make_blobs
+from sklearn.datasets import make_blobs, make_moons
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 
 st.title("K-means Clustering Demonstrator")
 
+# Adjusted text to reflect changes
 st.write("""
     Welcome to the K-means Clustering Demonstrator. This app lets you visualize how the K-means algorithm 
-    groups data into clusters. Use the sliders to change the number of samples, features, clusters, 
-    and iterations, then observe how these changes affect the clustering process and the resulting visualizations.
+    groups data into clusters with varying degrees of variance and demonstrates its limitations with 
+    non-convex cluster shapes.
 """)
 
 # Sidebar settings with explanations
 st.sidebar.header("K-means Settings")
-st.sidebar.markdown("""
-    **Number of Samples**: Adjust the total number of data points in the dataset.
-""")
-num_samples = st.sidebar.slider("Number of Samples", 100, 1000, 300)
+num_samples = st.sidebar.slider("Number of Samples", 100, 1000, 300, help="Adjust the total number of data points.")
+cluster_std = st.sidebar.slider("Cluster Std Dev", 0.5, 2.5, 1.0, help="Standard deviation of clusters. Higher values make clusters more spread out.")
+dataset_type = st.sidebar.selectbox("Dataset Type", ["Blobs", "Moons"], help="Choose the type of dataset to generate.")
 
-st.sidebar.markdown("""
-    **Number of Features**: Set the number of features that each data point will have.
-""")
-num_features = st.sidebar.slider("Number of Features", 2, 5, 2)
+num_clusters = st.sidebar.slider("Number of Clusters", 2, 10, 3, help="Select the number of clusters for 'Blobs' dataset only.")
+max_iter = st.sidebar.slider("Max Iterations", 10, 300, 100, help="Maximum number of iterations for the K-means algorithm.")
 
-st.sidebar.markdown("""
-    **Number of Clusters**: Select the number of clusters to form.
-""")
-num_clusters = st.sidebar.slider("Number of Clusters", 2, 10, 3)
-
-st.sidebar.markdown("""
-    **Max Iterations**: Define the maximum number of iterations for the K-means algorithm.
-""")
-max_iter = st.sidebar.slider("Max Iterations", 10, 300, 100)
-
-st.markdown("""
-    **Data Generation**  
-    The dataset is synthetically generated with the selected number of samples and features. 
-    The `make_blobs` function from `sklearn` is used to create a dataset for clustering.
-""")
-
-# Generate synthetic data
-X, _ = make_blobs(n_samples=num_samples, centers=num_clusters, n_features=num_features, random_state=42)
+# Generate synthetic data based on selected dataset type
+if dataset_type == "Blobs":
+    X, _ = make_blobs(n_samples=num_samples, centers=num_clusters, cluster_std=cluster_std, n_features=2, random_state=42)
+elif dataset_type == "Moons":
+    X, _ = make_moons(n_samples=num_samples, noise=cluster_std, random_state=42)
+    num_clusters = 2  # Moons dataset naturally forms 2 clusters
 
 # Run K-means
-kmeans = KMeans(n_clusters=num_clusters, max_iter=max_iter, random_state=42)
-kmeans.fit(X)
+kmeans = KMeans(n_clusters=num_clusters, max_iter=max_iter, random_state=42).fit(X)
 labels = kmeans.labels_
 
-# Plotting the K-means clustering
-st.subheader("K-means Clustering Result")
+# Plotting the K-means clustering result
 fig, ax = plt.subplots()
-scatter = ax.scatter(X[:, 0], X[:, 1], c=labels, cmap='viridis', marker='o')
+ax.scatter(X[:, 0], X[:, 1], c=labels, cmap='viridis', marker='o', label='Data Points')
 ax.scatter(kmeans.cluster_centers_[:, 0], kmeans.cluster_centers_[:, 1], s=300, c='red', marker='x', label='Centroids')
-plt.legend()
-plt.grid(True)
-plt.xlabel('Feature 1')
-plt.ylabel('Feature 2')
+ax.legend()
+ax.grid(True)
+ax.set_xlabel('Feature 1')
+ax.set_ylabel('Feature 2')
 st.pyplot(fig)
 
-st.write("""
-    The plot above displays the results of K-means clustering. Each point represents a data sample, 
-    and the color indicates the cluster it belongs to. The red 'X' marks represent the centroids 
-    of each cluster.
-""")
-
-# Function to calculate the Within-Cluster Sum of Square (WCSS)
-def calculate_wcss(data):
+# Function to calculate WCSS and silhouette scores
+def calculate_metrics(X, range_n_clusters):
     wcss = []
-    for n in range(2, 11):
-        kmeans = KMeans(n_clusters=n, max_iter=max_iter, random_state=42)
-        kmeans.fit(X)
+    silhouette_scores = []
+    for n in range_n_clusters:
+        kmeans = KMeans(n_clusters=n, max_iter=max_iter, random_state=42).fit(X)
         wcss.append(kmeans.inertia_)
-    return wcss
+        labels = kmeans.labels_
+        silhouette_scores.append(silhouette_score(X, labels))
+    return wcss, silhouette_scores
 
-# Elbow method to determine the optimal number of clusters
-st.subheader("Elbow Method for Optimal Number of Clusters")
-st.write("""
-    The elbow method plot below shows the Within-Cluster Sum of Square (WCSS) against 
-    the number of clusters. The 'elbow' point is often considered as an indicator of the 
-    optimal number of clusters.
-""")
-wcss = calculate_wcss(X)
-fig, ax = plt.subplots()
-ax.plot(range(2, 11), wcss)
-ax.set_xlabel('Number of clusters')
-ax.set_ylabel('WCSS')
-st.pyplot(fig)
-
-# Silhouette analysis
-st.subheader("Silhouette Analysis")
-st.write("""
-    Silhouette analysis measures how similar an object is to its own cluster compared to other clusters.
-    The silhouette score ranges from -1 to +1, where a high value indicates that the object is well matched 
-    to its own cluster and poorly matched to neighboring clusters.
-""")
+# Determine the optimal number of clusters based on silhouette score
 range_n_clusters = range(2, 11)
-silhouette_avg = []
-for n_clusters in range_n_clusters:
-    clusterer = KMeans(n_clusters=n_clusters, random_state=42)
-    cluster_labels = clusterer.fit_predict(X)
-    silhouette_avg.append(silhouette_score(X, cluster_labels))
+wcss, silhouette_scores = calculate_metrics(X, range_n_clusters)
+optimal_clusters = np.argmax(silhouette_scores) + 2  # +2 because range starts at 2
 
+# Plotting Elbow Method
+st.subheader("Elbow Method")
 fig, ax = plt.subplots()
-ax.plot(range_n_clusters, silhouette_avg)
-ax.set_xlabel('Number of clusters')
-ax.set_ylabel('Average Silhouette Score')
+ax.plot(range_n_clusters, wcss, marker='o')
+ax.set_xlabel('Number of Clusters')
+ax.set_ylabel('WCSS')
+ax.axvline(x=optimal_clusters, linestyle='--', color='r', label='Optimal Clusters')
+ax.legend()
 st.pyplot(fig)
 
-# Show current settings used to create the data
-st.sidebar.markdown("""
-    **Current Settings:**  
-    - Number of Samples: {}
-    - Number of Features: {}
-    - Number of Clusters: {}
-    - Max Iterations: {}
-""".format(num_samples, num_features, num_clusters, max_iter))
+# Plotting Silhouette Analysis
+st.subheader("Silhouette Analysis")
+fig, ax = plt.subplots()
+ax.plot(range_n_clusters, silhouette_scores, marker='o')
+ax.set_xlabel('Number of Clusters')
+ax.set_ylabel('Silhouette Score')
+ax.axvline(x=optimal_clusters, linestyle='--', color='r', label='Optimal Clusters')
+ax.legend()
+st.pyplot(fig)
+
+st.write(f"Optimal Number of Clusters based on Silhouette Score: {optimal_clusters}")
